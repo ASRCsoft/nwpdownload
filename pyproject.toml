@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nwpdownload"
+dynamic = ["version"]
+description = 'Tool for downloading weather forecast datasets '
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "William May", email = "wmay@hey.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/ASRCsoft/nwpdownload#readme"
+Issues = "https://github.com/ASRCsoft/nwpdownload/issues"
+Source = "https://github.com/ASRCsoft/nwpdownload"
+
+[tool.hatch.version]
+path = "src/nwpdownload/__about__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/nwpdownload tests}"
+
+[tool.coverage.run]
+source_pkgs = ["nwpdownload", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/nwpdownload/__about__.py",
+]
+
+[tool.coverage.paths]
+nwpdownload = ["src/nwpdownload", "*/nwpdownload/src/nwpdownload"]
+tests = ["tests", "*/nwpdownload/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]

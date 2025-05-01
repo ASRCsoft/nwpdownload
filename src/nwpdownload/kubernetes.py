@@ -21,15 +21,20 @@ def k8s_download_cluster(name, out_dir, n_workers=3, threads_per_worker=6,
            'EXTRA_PIP_PACKAGES': 'git+https://github.com/ASRCsoft/nwpdownload'}
     spec = make_cluster_spec(name=name, n_workers=n_workers,
                              resources=worker_resources, env=env)
-    # give the scheduler enough time to install the conda packages
+    # Get an image that will restart if package installation fails. See
+    # https://github.com/dask/dask-docker/issues/345
+    image = 'daskdev/dask:dev-py3.10'
     scheduler = spec['spec']['scheduler']['spec']['containers'][0]
-    scheduler['livenessProbe']['initialDelaySeconds'] = 300
+    worker = spec['spec']['worker']['spec']['containers'][0]
+    scheduler['image'] = image
+    worker['image'] = image
+    # give the scheduler enough time to install the conda packages
+    scheduler['livenessProbe']['initialDelaySeconds'] = 240
     # add the volume for writing data
     volume = {'hostPath': {'path': out_dir},
               'name': 'nwpout'}
     mount = {'name': 'nwpout', 'mountPath': '/mnt/nwp'}
     spec['spec']['worker']['spec']['volumes'] = [volume]
-    worker = spec['spec']['worker']['spec']['containers'][0]
     worker['volumeMounts'] = [mount]
     worker['args'].extend(['--nthreads', str(threads_per_worker)])
     return KubeCluster(custom_cluster_spec=spec,

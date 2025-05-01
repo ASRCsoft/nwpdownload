@@ -38,10 +38,17 @@ gefs_0p25.download() # download files in parallel with dask
 
 # Installation
 
-Install the package with
+Installation requires git to be installed. For running downloads locally,
+install the package with
 
 ```sh
 pip install git+https://github.com/ASRCsoft/nwpdownload
+```
+
+To get the dependencies for kubernetes, use
+
+```sh
+pip install nwpdownload[k8s]@git+https://github.com/ASRCsoft/nwpdownload
 ```
 
 # Clusters

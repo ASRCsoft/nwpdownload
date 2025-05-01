@@ -9,7 +9,7 @@ changes.
 
 ```python
 import pandas as pd
-from nwpdownload.collection import NwpCollection
+from nwpdownload import NwpCollection
 from dask.distributed import Client
 
 # set up the dask workers

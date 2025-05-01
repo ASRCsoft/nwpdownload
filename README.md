@@ -78,6 +78,15 @@ cluster = k8s_download_cluster('nwp-demo', '/path/to/nwp/data', n_workers=1,
 client = Client(cluster)
 ```
 
+When creating the `NwpCollection`, set `save_dir="/mnt/nwp"`. This is where the
+data directory will be mounted within the worker containers.
+
+```python
+gefs_0p25 = NwpCollection(runs, 'gefs', 'atmos.25', search_0p25, fxx,
+                          members=['avg'], save_dir='/mnt/nwp',
+                          extent=nyc_extent)
+```
+
 # Benchmarks
 
 On a kubernetes cluster with a high-speed internet connection, running 600

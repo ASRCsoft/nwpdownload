@@ -16,9 +16,9 @@ def make_k8s_download_cluster(name, out_dir, n_workers=3, threads_per_worker=6,
     else:
         scheduler_address = f'tcp://{name}-scheduler.svc.{local_domain}:8786'
     env = {"DASK_SCHEDULER_ADDRESS": scheduler_address,
-           'EXTRA_APT_PACKAGES': 'curl libeccodes0',
+           'EXTRA_APT_PACKAGES': 'curl git libeccodes0',
            'EXTRA_CONDA_PACKAGES': 'wgrib2',
-           'EXTRA_PIP_PACKAGES': 'herbie-data humanize'}
+           'EXTRA_PIP_PACKAGES': 'git+https://github.com/ASRCsoft/nwpdownload'}
     spec = make_cluster_spec(name=name, n_workers=n_workers,
                              resources=worker_resources, env=env)
     # give the scheduler enough time to install the conda packages

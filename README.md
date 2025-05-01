@@ -44,4 +44,35 @@ Install the package with
 pip install git+https://github.com/ASRCsoft/nwpdownload
 ```
 
+# Clusters
+
+The package contains functions to set up computing clusters with settings
+appropriate for parallel downloads (currently only kubernetes).
+
+## Kubernetes
+
+Requirements:
+
+- `kubectl` on the system running python, configured to connect to kubernetes
+- the dask-kubernetes-operator helm chart must be installed on kubernetes
+- permission to create kubernetes pods in the selected namespace
+- a directory that can be mounted by kubernetes, to store the files
+
+```python
+from nwpdownload.kubernetes import k8s_download_cluster
+from dask.distributed import Client
+
+# Create a cluster named nwp-demo and store files at
+# /path/to/nwp/data. Use port forwarding if running python outside of
+# kubernetes.
+cluster = k8s_download_cluster('nwp-demo', '/path/to/nwp/data', n_workers=1,
+                               threads_per_worker=6,
+                               port_forward_cluster_ip=True)
+client = Client(cluster)
+```
+
 # Benchmarks
+
+On a kubernetes cluster with a high-speed internet connection, running 600
+threads, I was able to download GEFS data from AWS at an average of 500MB/s
+(4Gb/s).

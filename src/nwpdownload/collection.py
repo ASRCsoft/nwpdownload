@@ -1,13 +1,12 @@
 '''Organize collections of NWP files.
 '''
 
-# import os, tempfile, shutil
 import tempfile, shutil
 from datetime import datetime
+from itertools import product
 from humanize import naturalsize
 import numpy as np
 import dask
-import dask.bag as db
 from herbie import Herbie, wgrib2
 from .nwppath import NwpPath
 from .nwpdownloader import NwpDownloader
@@ -65,35 +64,42 @@ class NwpCollection:
             print('Nothing to download.')
             return dask.compute()
         use_bag = status['n_remaining'] > 50000
-        remaining_coords = np.stack(np.where(~status['download_array'])).T
-        # with tempfile.TemporaryDirectory() as tmp_dir:
-        #     print(tmp_dir)
-        #     # tasks = [ dask.delayed(self._download_from_coords)(coords, tmp_dir)
-        #     #           for coords in list(remaining_coords) ]
-        #     tasks = [ self._download_from_coords(coords, tmp_dir)
-        #               for coords in list(remaining_coords) ]
-        #     return tasks
-        #     #return dask.compute(*tasks)
+        # in the future it would be nice to check to see if the file exists
+        # remaining_coords = np.stack(np.where(~status['download_array'])).T
+        batch_size = 10000
+        n_batches = int(np.ceil(status['n_remaining'] / batch_size))
+        if len(status['download_array'].shape) == 2:
+            coords_iter = product(
+                range(status['download_array'].shape[0]),
+                range(status['download_array'].shape[1])
+            )
+        elif len(status['download_array'].shape) == 3:
+            coords_iter = product(
+                range(status['download_array'].shape[0]),
+                range(status['download_array'].shape[1]),
+                range(status['download_array'].shape[2])
+            )
+        # client = get_client()
         start_time = datetime.now()
-        # with tempfile.TemporaryDirectory() as tmp_dir:
-        # print(tmp_dir)
-        if use_bag:
-            print('organizing dask bag')
-            # bag = db.from_sequence(tasks, npartitions=1000)
-            # bag.compute()
-            bag = db.from_sequence(remaining_coords, npartitions=1000)
-            # bag.map(lambda x: self._extract_region(self._download_from_coords(x, tmp_dir), x))
-            bag.map(self._download_and_extract)
-            bag.compute()
-        else:
-            tasks = []
-            for coords in remaining_coords:
-                # full_file = dask.delayed(self._download_from_coords)(coords, tmp_dir)
-                # region_file = dask.delayed(self._extract_region)(full_file, coords)
-                # tasks.append(region_file)
-                out_file = dask.delayed(self._download_and_extract)(coords)
-                tasks.append(out_file)
-            dask.compute(*tasks)
+        # `client.map` really should work for this, but dask annoyingly refuses
+        # to accept iterators for it
+        # client.map(self._download_and_extract, coords_iter, retries=2,
+        #            pure=False, batch_size=batch_size)
+        dask_batch = []
+        batch_idx = 1
+        for coords in coords_iter:
+            job_i = dask.delayed(self._download_and_extract, pure=False)(coords)
+            dask_batch.append(job_i)
+            if len(dask_batch) == batch_size:
+                print(f'Starting batch {batch_idx} of {n_batches}')
+                batch_start = datetime.now()
+                dask.compute(dask_batch, retries=2)
+                dask_batch = []
+                batch_idx += 1
+                batch_time = datetime.now() - batch_start
+                print(f'Batch took {batch_time}')
+        if len(dask_batch):
+            dask.compute(*dask_batch, retries=2)
         time_elapsed = datetime.now() - start_time
         print(f'Total run time: {time_elapsed}')
 

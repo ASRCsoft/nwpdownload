@@ -24,7 +24,17 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = []
+dependencies = [
+  "dask",
+  "herbie",
+  "humanize",
+  "numpy",
+  "pandas",
+  "requests"
+]
+
+[project.optional-dependencies]
+k8s = ["dask-kubernetes"]
 
 [project.urls]
 Documentation = "https://github.com/ASRCsoft/nwpdownload#readme"

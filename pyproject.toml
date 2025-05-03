@@ -44,6 +44,11 @@ Source = "https://github.com/ASRCsoft/nwpdownload"
 [tool.hatch.version]
 path = "src/nwpdownload/__about__.py"
 
+[tool.hatch.envs.default]
+type = "conda"
+python = "3.10"
+environment-file = "environment.yml"
+
 [tool.hatch.envs.types]
 extra-dependencies = [
   "mypy>=1.0.0",

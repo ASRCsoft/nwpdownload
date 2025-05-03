@@ -1,12 +1,12 @@
 '''Organize collections of NWP files.
 '''
 
-import tempfile, shutil
+import tempfile, shutil, dask
 from datetime import datetime
 from itertools import product
 from humanize import naturalsize
 import numpy as np
-import dask
+from dask.distributed import get_client
 from herbie import Herbie, wgrib2
 from .nwppath import NwpPath
 from .nwpdownloader import NwpDownloader
@@ -63,10 +63,10 @@ class NwpCollection:
         if not status['n_remaining']:
             print('Nothing to download.')
             return dask.compute()
-        use_bag = status['n_remaining'] > 50000
+        # use_bag = status['n_remaining'] > 50000
         # in the future it would be nice to check to see if the file exists
         # remaining_coords = np.stack(np.where(~status['download_array'])).T
-        batch_size = 10000
+        batch_size = 5000
         n_batches = int(np.ceil(status['n_remaining'] / batch_size))
         if len(status['download_array'].shape) == 2:
             coords_iter = product(
@@ -79,38 +79,46 @@ class NwpCollection:
                 range(status['download_array'].shape[1]),
                 range(status['download_array'].shape[2])
             )
-        # client = get_client()
-        start_time = datetime.now()
         # `client.map` really should work for this, but dask annoyingly refuses
         # to accept iterators for it
         # client.map(self._download_and_extract, coords_iter, retries=2,
         #            pure=False, batch_size=batch_size)
-        dask_batch = []
-        batch_idx = 1
-        for coords in coords_iter:
-            job_i = dask.delayed(self._download_and_extract, pure=False)(coords)
-            dask_batch.append(job_i)
-            if len(dask_batch) == batch_size:
-                print(f'Starting batch {batch_idx} of {n_batches}')
-                batch_start = datetime.now()
-                dask.compute(dask_batch, retries=2)
-                dask_batch = []
-                batch_idx += 1
-                batch_time = datetime.now() - batch_start
-                print(f'Batch took {batch_time}')
-        if len(dask_batch):
-            dask.compute(*dask_batch, retries=2)
+        client = get_client()
+        start_time = datetime.now()
+        futures_list = []
+        # get things started
+        futures_list.append(self._submit_download_batch(client, coords_iter,
+                                                        batch_size, 1))
+        futures_list.append(self._submit_download_batch(client, coords_iter,
+                                                        batch_size, 2))
+        batch_idx = 2
+        while len(futures_list):
+            # wait for first batch of futures to complete
+            client.gather(futures_list[0])
+            futures_list.pop(0)
+            # then submit a new batch to the list
+            batch_idx += 1
+            batch_futures = self._submit_download_batch(client, coords_iter,
+                                                        batch_size, batch_idx)
+            if len(batch_futures):
+                futures_list.append(batch_futures)
         time_elapsed = datetime.now() - start_time
         print(f'Total run time: {time_elapsed}')
 
-    # def _download_from_coords(self, coords, tmp_dir):
-    #     '''Download a single file using the coordinates from the download
-    #     status matrix.
-    #     '''
-    #     date = self.DATES[coords[0]]
-    #     fxx = self.fxx[coords[1]]
-    #     member = self.members[coords[2]]
-    #     self._download(tmp_dir, date, fxx=fxx, member=member)
+    def _submit_download_batch(self, client, coords_iter, batch_size,
+                               batch_idx):
+        futures = []
+        for i, coords in enumerate(coords_iter):
+            # key = f'batch{batch_idx}_download_{i}'
+            res_i = client.submit(self._download_and_extract, coords,
+                                  key=f'batch{batch_idx}_download-{i}',
+                                  # decrement the priority with each batch so
+                                  # they complete in order
+                                  retries=2, priority=-batch_idx, pure=False)
+            futures.append(res_i)
+            if i == batch_size - 1:
+                break
+        return futures
 
     def _download_and_extract(self, coords):
         '''Download a single file using the coordinates from the download
@@ -128,52 +136,14 @@ class NwpCollection:
             region_file = wgrib2.region(full_file, self.extent)
             if not out_path.parent.is_dir():
                 out_path.parent.mkdir(parents=True, exist_ok=True)
-            # os.rename(region_file, out_path)
-            # os.rename(str(region_file) + '.idx', str(out_path) + '.idx')
             shutil.move(region_file, out_path)
             shutil.move(str(region_file) + '.idx', str(out_path) + '.idx')
         return out_path
-
-    # def _download_from_coords(self, coords, tmp_dir):
-    #     '''Download a single file using the coordinates from the download
-    #     status matrix.
-    #     '''
-    #     date = self.DATES[coords[0]]
-    #     fxx = self.fxx[coords[1]]
-    #     member = self.members[coords[2]]
-    #     # create an individual directory for each download
-    #     tmp_subdir = tempfile.mkdtemp(dir=tmp_dir)
-    #     return self._download(tmp_subdir, date, fxx=fxx, member=member)
-
-    # def _extract_region(self, full_file, coords):
-    #     '''Call `wgrib2.region` in a manner that works with `dask.delayed`.
-    #     '''
-    #     date = self.DATES[coords[0]]
-    #     fxx = self.fxx[coords[1]]
-    #     member = self.members[coords[2]]
-    #     nwp_file = NwpPath(date, model=self.model, product=self.product,
-    #                        save_dir=self.save_dir, fxx=fxx, member=member)
-    #     out_path = nwp_file.get_localFilePath()
-    #     if not out_path.parent.is_dir():
-    #         out_path.parent.mkdir(parents=True, exist_ok=True)
-    #     region_file = wgrib2.region(full_file, self.extent)
-    #     os.rename(region_file, out_path)
-    #     os.rename(str(region_file) + '.idx', str(out_path) + '.idx')
-    #     shutil.rmtree(full_file.parent)
 
     def _download(self, tmp_dir, *args, **kwargs):
         '''Download an NWP grib2 file using Herbie, and subset it with wgrib2.
         Discards the full file.
         '''
-        # nwp_file = NwpPath(*args, **kwargs, model=self.model,
-        #                    product=self.product, save_dir=self.save_dir)
-        # out_path = nwp_file.get_localFilePath()
-        # if not out_path.parent.is_dir():
-        #     out_path.parent.mkdir(parents=True, exist_ok=True)
-        # with tempfile.TemporaryDirectory() as tmp_dir:
-        # tmp_archive = Herbie(*args, **kwargs, save_dir=tmp_dir,
-        #                      model=self.model, product=self.product,
-        #                      verbose=False)
         tmp_archive = NwpDownloader(*args, **kwargs, save_dir=tmp_dir,
                                     model=self.model, product=self.product,
                                     verbose=False)
@@ -183,11 +153,6 @@ class NwpCollection:
         tmp_path.parent.mkdir(parents=True, exist_ok=True)
         full_file = tmp_archive.download(self.search_string)
         return full_file
-        # region_file = wgrib2.region(full_file, self.extent)
-        # full_file = dask.delayed(tmp_archive.download)(self.search_string)
-        # region_file = self._wgrib2_region_delayed(full_file, out_path)
-        # os.rename(region_file, out_path)
-        # os.rename(str(region_file) + '.idx', str(out_path) + '.idx')
 
     def _file_exists(self, *args, **kwargs):
         '''Check if the file exists for a given date, fxx, and member.

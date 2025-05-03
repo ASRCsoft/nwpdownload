@@ -3,3 +3,7 @@ channels:
 dependencies:
   - python=3.10.12
   - wgrib2
+  - pip:
+    - dask-kubernetes
+    - bokeh>=3.1.0 # for dask dashboard
+    - ipython

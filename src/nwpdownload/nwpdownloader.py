@@ -342,14 +342,15 @@ class NwpDownloader(NwpPath):
 
             df = df.dropna(how="all", axis=1)
 
-            df["search_this"] = (
-                df.loc[:, "variable":]
-                .astype(str)
-                .apply(
-                    lambda x: ":" + ":".join(x).rstrip(":").replace(":nan:", ":"),
-                    axis=1,
+            with pd.option_context('mode.chained_assignment', None):
+                df["search_this"] = (
+                    df.loc[:, "variable":]
+                    .astype(str)
+                    .apply(
+                        lambda x: ":" + ":".join(x).rstrip(":").replace(":nan:", ":"),
+                        axis=1,
+                    )
                 )
-            )
 
         if self.IDX_STYLE == "eccodes":
             # eccodes keywords explained here:

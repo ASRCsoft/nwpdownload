@@ -7,3 +7,5 @@ dependencies:
     - dask-kubernetes
     - bokeh>=3.1.0 # for dask dashboard
     - ipython
+    - lz4==4.3.3 # matching dask container
+    - toolz==0.12.0

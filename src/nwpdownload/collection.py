@@ -3,13 +3,17 @@
 
 import tempfile, shutil, dask
 from datetime import datetime
-from itertools import product
 from humanize import naturalsize
+import itertools as it
 import numpy as np
 from dask.distributed import get_client
 from herbie import Herbie, wgrib2
 from .nwppath import NwpPath
 from .nwpdownloader import NwpDownloader
+
+def chunk_list(l, n):
+    # https://stackoverflow.com/a/312464/5548959
+    return [ l[i:i + n] for i in range(0, len(l), n) ]
 
 class NwpCollection:
     '''Download a (potentially large) collection of NWP files. This is
@@ -63,62 +67,68 @@ class NwpCollection:
         if not status['n_remaining']:
             print('Nothing to download.')
             return dask.compute()
-        # use_bag = status['n_remaining'] > 50000
         # in the future it would be nice to check to see if the file exists
         # remaining_coords = np.stack(np.where(~status['download_array'])).T
-        batch_size = 5000
-        n_batches = int(np.ceil(status['n_remaining'] / batch_size))
         if len(status['download_array'].shape) == 2:
-            coords_iter = product(
+            coords_iter = it.product(
                 range(status['download_array'].shape[0]),
                 range(status['download_array'].shape[1])
             )
         elif len(status['download_array'].shape) == 3:
-            coords_iter = product(
+            coords_iter = it.product(
                 range(status['download_array'].shape[0]),
                 range(status['download_array'].shape[1]),
                 range(status['download_array'].shape[2])
             )
-        # `client.map` really should work for this, but dask annoyingly refuses
-        # to accept iterators for it
-        # client.map(self._download_and_extract, coords_iter, retries=2,
-        #            pure=False, batch_size=batch_size)
         client = get_client()
+        total_threads = sum(client.nthreads().values())
+        # if there are many threads, combine downloads into chunks to reduce the work of
+        # the scheduler
+        chunk_size = 1 + total_threads // 100
+        batch_size = 5000 * chunk_size
+        n_batches = int(np.ceil(status['n_remaining'] / batch_size))
+        self.batch_idx = 1
+        def submit_batch():
+            out = self._submit_download_batch(client, coords_iter, batch_size,
+                                              self.batch_idx, n_batches,
+                                              chunk_size)
+            self.batch_idx += 1
+            return out
         start_time = datetime.now()
         futures_list = []
         # get things started
-        futures_list.append(self._submit_download_batch(client, coords_iter,
-                                                        batch_size, 1))
-        futures_list.append(self._submit_download_batch(client, coords_iter,
-                                                        batch_size, 2))
-        batch_idx = 2
+        futures_list.append(submit_batch())
+        futures_list.append(submit_batch())
         while len(futures_list):
             # wait for first batch of futures to complete
             client.gather(futures_list[0])
             futures_list.pop(0)
             # then submit a new batch to the list
-            batch_idx += 1
-            batch_futures = self._submit_download_batch(client, coords_iter,
-                                                        batch_size, batch_idx)
+            batch_futures = submit_batch()
             if len(batch_futures):
                 futures_list.append(batch_futures)
         time_elapsed = datetime.now() - start_time
         print(f'Total run time: {time_elapsed}')
 
-    def _submit_download_batch(self, client, coords_iter, batch_size,
-                               batch_idx):
-        futures = []
-        for i, coords in enumerate(coords_iter):
-            # key = f'batch{batch_idx}_download_{i}'
-            res_i = client.submit(self._download_and_extract, coords,
-                                  key=f'batch{batch_idx}_download-{i}',
-                                  # decrement the priority with each batch so
-                                  # they complete in order
-                                  retries=2, priority=-batch_idx, pure=False)
-            futures.append(res_i)
-            if i == batch_size - 1:
-                break
-        return futures
+    def _submit_download_batch(self, client, coords_iter, batch_size, batch_idx,
+                               n_batches, chunk_size):
+        coords_batch = list(it.islice(coords_iter, batch_size))
+        if chunk_size == 1:
+            key = f'batch{batch_idx}/{n_batches}_download'
+            return client.map(self._download_and_extract, coords_batch, key=key,
+                              # decrement the priority with each batch so they
+                              # complete in order
+                              retries=2, priority=-batch_idx, pure=False)
+        coords_lists = chunk_list(coords_batch, chunk_size)
+        key = f'batch{batch_idx}/{n_batches}_download_x{chunk_size}'
+        return client.map(self._download_multiple, coords_lists,
+                          # decrement the priority with each batch so they
+                          # complete in order
+                          key=key, retries=2, priority=-batch_idx, pure=False)
+
+    def _download_multiple(self, coords_list):
+        for coords in coords_list:
+            self._download_and_extract(coords)
 
     def _download_and_extract(self, coords):
         '''Download a single file using the coordinates from the download
@@ -141,8 +151,7 @@ class NwpCollection:
         return out_path
 
     def _download(self, tmp_dir, *args, **kwargs):
-        '''Download an NWP grib2 file using Herbie, and subset it with wgrib2.
-        Discards the full file.
+        '''Download an NWP grib2 file using Herbie.
         '''
         tmp_archive = NwpDownloader(*args, **kwargs, save_dir=tmp_dir,
                                     model=self.model, product=self.product,

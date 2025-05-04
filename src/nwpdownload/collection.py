@@ -16,14 +16,50 @@ def chunk_list(l, n):
     return [ l[i:i + n] for i in range(0, len(l), n) ]
 
 class NwpCollection:
-    '''Download a (potentially large) collection of NWP files. This is
-    similar to `FastHerbie`, but instead of downloading all index files, it
-    downloads only the files that are currently missing. Unlike `Herbie`, it
-    checks for files before downloading anything, which can save large amounts
-    of time when a large collection is partially downloaded.
+    '''Manage and download a (potentially large) collection of NWP files.
+
+    This is similar to `FastHerbie`, but includes more download optimizations
+    and works with Dask. Arguments are generally the same as `Herbie`,
+    `FastHerbie`, and `wgrib2.region` from Herbie.
+
+    Args:
+        DATES : pandas-parsable datetime string or list of datetimes
+        fxx : int or pandas-parsable timedelta (e.g. "6h")
+            Forecast lead time *in hours*. Available lead times depend on
+            the model type and model version.
+        model : {'hrrr', 'hrrrak', 'rap', 'gfs', 'ecmwf', etc.}
+            Model name as defined in the models template folder.
+            CASE INSENSITIVE; e.g., "HRRR" is the same as "hrrr".
+        product : {'sfc', 'prs', 'nat', 'subh', etc.}
+            Output variable product file type. If not specified, will
+            use first product in model template file. CASE SENSITIVE.
+            For example, the HRRR model has these products:
+            - ``'sfc'`` surface fields
+            - ``'prs'`` pressure fields
+            - ``'nat'`` native fields
+            - ``'subh'`` subhourly fields
+        search : str
+            If None, download the full file. Else, use regex to subset
+            the file by specific variables and levels.
+            Read more in the user guide:
+            https://herbie.readthedocs.io/en/latest/user_guide/tutorial/search.html
+        member : None or int
+            Some ensemble models (e.g. the future RRFS) will need to
+            specify an ensemble member.
+        save_dir : str or pathlib.Path
+            Location to save GRIB2 files locally. When downloading with a dask
+            cluster, this must be a directory accessible within the workers.
+        extent : 4-item tuple or list
+            Longitude and Latitude bounds representing the region of
+            interest.
+            (lon_min, lon_max, lat_min, lat_max) : float
+
     '''
-    def __init__(self, DATES, model, product, search_string, fxx, members=None,
+    
+    def __init__(self, DATES, fxx, model, product, search, members=None,
                  save_dir=None, extent=None):
+        '''Create an `NwpCollection`.
+        '''
         self.DATES = DATES
         self.model = model
         self.product = product

@@ -3,12 +3,41 @@
 
 from dask_kubernetes.operator import KubeCluster, make_cluster_spec
 
-def k8s_download_cluster(name, out_dir, n_workers=3, threads_per_worker=6,
-                         worker_memory='2G', local_domain=None,
-                         port_forward_cluster_ip=None):
-    '''Set up a kubernetes cluster for downloading NWP data. Each worker has 1
-    CPU, and will write data to `out_dir`. Requires the dask kubernetes operator
-    to be installed on the cluster.
+def k8s_download_cluster(name, out_dir, namespace=None, n_workers=3,
+                         threads_per_worker=6, worker_memory='2G',
+                         local_domain=None, port_forward_cluster_ip=None):
+    '''Set up a kubernetes cluster for downloading NWP data.
+
+    Each worker has 1 CPU, and writes data to `out_dir`. When creating a
+    `NwpCollection` using this cluster, set `save_dir="/mnt/nwp"`. This is where
+    the data directory will be mounted within the worker containers.
+
+    Requirements:
+      - `kubectl` on the system running python, configured to connect to
+        kubernetes
+      - the dask-kubernetes-operator helm chart must be installed on kubernetes
+      - user permission to create kubernetes pods in the selected namespace
+
+    Args:
+        name: Name of the cluster.
+        out_dir: Directory where files will be downloaded. This directory will
+            be mounted by the workers.
+        namespace: Namespace in which to launch the workers. Defaults to current
+            namespace if available or "default".
+        n_workers: Number of workers.
+        threads_per_worker: Threads per worker (core). For downloads, it's
+            efficient to have multiple threads per core.
+        worker_memory: Worker RAM.
+        local_domain: The local domain used by kubernetes (the kubernetes
+            default is "cluster.local"). If `None`, will attempt to find the
+            domain automatically.
+        port_forward_cluster_ip: Set to `True` if the main python is running
+            outside of kubernetes. If `None`, will attempt to find the correct
+            setting.
+
+    Returns:
+        dask cluster
+
     '''
     worker_resources = {'limits': {'cpu': '1', 'memory': worker_memory}}
     if local_domain is None:
@@ -37,5 +66,5 @@ def k8s_download_cluster(name, out_dir, n_workers=3, threads_per_worker=6,
     spec['spec']['worker']['spec']['volumes'] = [volume]
     worker['volumeMounts'] = [mount]
     worker['args'].extend(['--nthreads', str(threads_per_worker)])
-    return KubeCluster(custom_cluster_spec=spec,
+    return KubeCluster(namespace=namespace, custom_cluster_spec=spec,
                        port_forward_cluster_ip=port_forward_cluster_ip)

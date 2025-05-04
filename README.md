@@ -28,7 +28,7 @@ nyc_extent = (285.5, 286.5, 40, 41.5)
 runs = pd.date_range(start='2021-04-01 12:00', periods=4, freq='D')
 fxx = range(3, 24 * 8, 3) # 63 forecast hours going out 8 days
 
-gefs_0p25 = NwpCollection(runs, 'gefs', 'atmos.25', search_0p25, fxx,
+gefs_0p25 = NwpCollection(runs, fxx, 'gefs', 'atmos.25', search_0p25,
                           members=['avg'], save_dir='/path/to/nwp/data',
                           extent=nyc_extent)
 gefs_0p25.collection_size() # estimate the complete download size
@@ -90,7 +90,7 @@ When creating the `NwpCollection`, set `save_dir="/mnt/nwp"`. This is where the
 data directory will be mounted within the worker containers.
 
 ```python
-gefs_0p25 = NwpCollection(runs, 'gefs', 'atmos.25', search_0p25, fxx,
+gefs_0p25 = NwpCollection(runs, fxx, 'gefs', 'atmos.25', search_0p25,
                           members=['avg'], save_dir='/mnt/nwp',
                           extent=nyc_extent)
 ```

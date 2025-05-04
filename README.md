@@ -98,5 +98,5 @@ gefs_0p25 = NwpCollection(runs, 'gefs', 'atmos.25', search_0p25, fxx,
 # Benchmarks
 
 On a kubernetes cluster with a high-speed internet connection, running 600
-threads, I was able to download GEFS data from AWS at an average of 500MB/s
+threads, I was able to download GEFS data from AWS at an average of 700MB/s
 (4Gb/s).

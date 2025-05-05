@@ -44,21 +44,18 @@ def k8s_download_cluster(name, out_dir, namespace=None, n_workers=3,
         scheduler_address = f'tcp://{name}-scheduler:8786'
     else:
         scheduler_address = f'tcp://{name}-scheduler.svc.{local_domain}:8786'
-    env = {"DASK_SCHEDULER_ADDRESS": scheduler_address,
-           'EXTRA_APT_PACKAGES': 'curl git',
-           'EXTRA_CONDA_PACKAGES': 'wgrib2',
-           'EXTRA_PIP_PACKAGES': 'git+https://github.com/ASRCsoft/nwpdownload'}
+    env = {'DASK_SCHEDULER_ADDRESS': scheduler_address,
+           # make sure we get the newest version
+           'EXTRA_PIP_PACKAGES': 'git+https://github.com/ASRCsoft/nwpdownload --upgrade'}
     spec = make_cluster_spec(name=name, n_workers=n_workers,
                              resources=worker_resources, env=env)
-    # Get an image that will restart if package installation fails. See
-    # https://github.com/dask/dask-docker/issues/345
-    image = 'daskdev/dask:dev-py3.10'
+    image = 'wcmay/nwpdownload:firstpush'
     scheduler = spec['spec']['scheduler']['spec']['containers'][0]
     worker = spec['spec']['worker']['spec']['containers'][0]
     scheduler['image'] = image
     worker['image'] = image
-    # give the scheduler enough time to install the conda packages
-    scheduler['livenessProbe']['initialDelaySeconds'] = 240
+    # give the scheduler a little extra time to install the package
+    scheduler['livenessProbe']['initialDelaySeconds'] = 30
     # add the volume for writing data
     volume = {'hostPath': {'path': out_dir},
               'name': 'nwpout'}

@@ -9,8 +9,8 @@ def k8s_download_cluster(name, out_dir, namespace=None, n_workers=3,
     '''Set up a kubernetes cluster for downloading NWP data.
 
     Each worker has 1 CPU, and writes data to `out_dir`. When creating a
-    `NwpCollection` using this cluster, set `save_dir="/mnt/nwp"`. This is where
-    the data directory will be mounted within the worker containers.
+    `NwpCollection` using this cluster, set `save_dir="/mnt/nwpdownload"`. This
+    is where the data directory will be mounted within the worker containers.
 
     Requirements:
       - `kubectl` on the system running python, configured to connect to
@@ -59,7 +59,7 @@ def k8s_download_cluster(name, out_dir, namespace=None, n_workers=3,
     # add the volume for writing data
     volume = {'hostPath': {'path': out_dir},
               'name': 'nwpout'}
-    mount = {'name': 'nwpout', 'mountPath': '/mnt/nwp'}
+    mount = {'name': 'nwpout', 'mountPath': '/mnt/nwpdownload'}
     spec['spec']['worker']['spec']['volumes'] = [volume]
     worker['volumeMounts'] = [mount]
     worker['args'].extend(['--nthreads', str(threads_per_worker)])

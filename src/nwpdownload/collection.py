@@ -63,7 +63,7 @@ class NwpCollection:
         self.DATES = DATES
         self.model = model
         self.product = product
-        self.search_string = search_string
+        self.search_string = search
         self.fxx = fxx
         self.members = members
         self.save_dir = save_dir

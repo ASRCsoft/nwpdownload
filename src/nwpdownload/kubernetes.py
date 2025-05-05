@@ -4,7 +4,7 @@
 from dask_kubernetes.operator import KubeCluster, make_cluster_spec
 
 def k8s_download_cluster(name, out_dir, namespace=None, n_workers=3,
-                         threads_per_worker=6, worker_memory='2G',
+                         threads_per_worker=6, worker_memory='1G',
                          local_domain=None, port_forward_cluster_ip=None):
     '''Set up a kubernetes cluster for downloading NWP data.
 

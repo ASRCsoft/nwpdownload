@@ -130,7 +130,7 @@ class NwpCollection:
                                               chunk_size)
             self.batch_idx += 1
             return out
-        print(f'Dashboard link: {client.dashboard}')
+        print(f'Dashboard link: {client.dashboard_link}')
         start_time = datetime.now()
         futures_list = []
         # get things started

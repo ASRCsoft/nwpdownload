@@ -64,16 +64,22 @@ def append_level_to_repeated_varnames(ds_list):
                 ds_list[i] = append_level_to_varname(ds, v)
     return ds_list
 
-def remove_z_coordinate(ds):
+def remove_z_coordinate(ds, z_coord):
     '''Remove the vertical coordinate from a dataset, and add it as an attribute
     instead.
     '''
-    # cfgrib stores the vertical coordinate as the fourth value
-    z_coord_idx = 3 if 'number' in ds.coords.keys() else 2
-    z_coord = list(ds.coords.keys())[z_coord_idx]
+    # need to split array if it contains multiple z levels
     if len(ds[z_coord].values.shape):
-        print(ds)
-        raise Exception(f'Unexpected coordinates for {z_coord}: {ds[z_coord].values}')
+        # split dataset. We can subset dimensions using a dictionary
+        ds_list = []
+        for i in range(len(ds[z_coord].values)):
+            index = {z_coord: i}
+            ds_list.append(ds[index])
+        # apply `remove_z_coordinate` to each dataset
+        ds_list = append_level_to_repeated_varnames(ds_list)
+        ds_list = [ remove_z_coordinate(ds_i, z_coord) for ds_i in ds_list ]
+        # recombine
+        return xr.merge(ds_list, combine_attrs='drop_conflicts')
     z_value = float(ds[z_coord].values)
     vars = list(ds.data_vars)
     for v in vars:
@@ -81,12 +87,44 @@ def remove_z_coordinate(ds):
         ds[v].attrs[z_coord] = z_value
     return ds.drop_vars(z_coord)
 
+def get_z_coordinates(ds_list):
+    '''Identify the vertical coordinates by their absence from some datasets
+    '''
+    all_coords = set()
+    z_coords = set()
+    for ds in ds_list:
+        ds_coords = set(ds.coords)
+        all_coords = all_coords.union(ds_coords)
+    for ds in ds_list:
+        ds_coords = set(ds.coords)
+        ds_diff = all_coords.difference(ds_coords)
+        if len(ds_diff):
+            z_coords = z_coords.union(ds_diff)
+    return z_coords
+
+def remove_z_coordinates(ds_list):
+    '''Remove the vertical coordinate from a dataset list, and add it as an
+    array attribute instead.
+    '''
+    z_coords = get_z_coordinates(ds_list)
+    # there should only be one z coordinate in a dataset
+    out_list = []
+    for ds in ds_list:
+        ds_coords = set(ds.coords)
+        ds_z = ds_coords.intersection(z_coords)
+        if len(ds_z):
+            out_list.append(remove_z_coordinate(ds, list(ds_z)[0]))
+        else:
+            out_list.append(ds)
+    return out_list
+
 def merge_nwp_variables(ds_list):
     '''Standardize variable coordinates and merge them into a single dataset.
     '''
     out_list = append_level_to_repeated_varnames(ds_list)
-    out_list = [ remove_z_coordinate(ds) for ds in out_list ]
-    return xr.merge(out_list)
+    out_list = remove_z_coordinates(ds_list)
+    # out_list = [ remove_z_coordinate(ds) for ds in out_list ]
+    return xr.merge(out_list, combine_attrs='drop_conflicts')
 
 def get_nwp_product_vars(var_df, dir, product, members, runs=None):
     '''Get a list of variables for a given NWP product.

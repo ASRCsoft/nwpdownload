@@ -34,6 +34,9 @@ gefs_0p25 = NwpCollection(runs, fxx, 'gefs', 'atmos.25', search_0p25,
 gefs_0p25.collection_size() # estimate the complete download size
 gefs_0p25.get_status() # summary of existing files
 gefs_0p25.download() # download files in parallel with dask
+
+# The data can be opened in xarray, much like with cfgrib
+dataset_list = gefs_0p25.open_datasets()
 ```
 
 # Installation

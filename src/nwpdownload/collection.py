@@ -6,6 +6,7 @@ from datetime import datetime
 from humanize import naturalsize
 import itertools as it
 import numpy as np
+import xarray as xr
 from dask.distributed import get_client
 from herbie import Herbie, wgrib2
 from .nwppath import NwpPath
@@ -229,3 +230,98 @@ class NwpCollection:
             return naturalsize(full_download_size)
         else:
             return full_download_size
+
+    def _array_from_coords(self, coords, var_conf):
+        '''Get grib array from run/fxx/member coordinates.
+        '''
+        fcoords = NwpPath(self.DATES[coords[0]], model=self.model, product=self.product,
+                          fxx=self.fxx[coords[1]], member=self.members[coords[2]],
+                          save_dir=self.save_dir)
+        grib_path = fcoords.get_localFilePath()
+        backend_kwargs = {'filter_by_keys': var_conf['filter_by_keys'],
+                          'indexpath': ''}
+        try:
+            ds = xr.open_dataset(grib_path, engine='cfgrib',
+                                 decode_timedelta=True,
+                                 backend_kwargs=backend_kwargs)
+            out = ds[var_conf['name']].values
+        except Exception as e:
+            # convert the error to a warning, and return an empty array
+            warnings.warn(str(e))
+            out = np.full(var_conf['shape'], np.nan)
+        # check that the array has the correct shape
+        if out.shape != var_conf['shape']:
+            warnings.warn('Array has incorrect shape')
+            out = np.full(var_conf['shape'], np.nan)
+        return out
+
+    def _members_arr(self, coords, var_conf):
+        return np.stack([ self._array_from_coords(coords + (i, ), var_conf)
+                          for i in range(len(self.members)) ])
+
+    def _fxx_arr_map(self, var_conf, block_id=None, block_info=None):
+        out = np.stack([ self._members_arr((block_id[0], i), var_conf)
+                         for i in range(len(self.fxx)) ])
+        return np.expand_dims(out, 0)
+
+    # Rather than create a dask array for each file, create one for each
+    # forecast run. This is much more manageable for the dask scheduler.
+    def _delayed_collection_arr(self, var_conf):
+        coords = {'time': self.DATES, 'step': self.fxx, 'number': self.members}
+        coords.update(var_conf['dims'])
+        fxx_shape = (len(self.fxx), len(self.members)) + var_conf['shape']
+        # use `map_blocks` instead of `stack`
+        n_runs = len(self.DATES)
+        arr = da.map_blocks(self._fxx_arr_map, var_conf,
+                            dtype=var_conf['dtype'],
+                            chunks=((1, ) * n_runs, *fxx_shape),
+                            meta=np.array((), dtype=var_conf['dtype']))
+        return xr.DataArray(arr, coords=coords, name=var_conf['name'])
+
+    def open_datasets(self):
+        '''Analogous to `cfgrib.open_datasets`, but for a collection of files.
+        Open the file collection as a list of xarray datasets, one for each
+        incompatible set of data dimensions. Each list item is an xarray dataset
+        with data from the entire file collection, where the data arrays are
+        dask arrays.
+        '''
+        # read a single grib2 file to get coordinates and attributes
+        # Getting info about the dataset--
+        # - array shape (x/y coordinates)
+        # - variable info for filter_by_keys
+        # - attributes
+        f0 = NwpPath(self.DATES[0], model=self.model, product=self.product, fxx=self.fxx[0],
+                     member=self.members[0], save_dir=self.save_dir)
+        grib_path = f0.get_localFilePath()
+        # to make sure this reads from the correct location, must use
+        # `dask.delayed`
+        ds_list = dask.delayed(cfgrib.open_datasets)(grib_path,
+                                                     decode_timedelta=True)
+        ds_list = ds_list.compute()
+        attr_dict = {}
+        outer_list = []
+        for ds in ds_list:
+            conf_list = []
+            for v in ds.data_vars:
+                conf = {'name': v}
+                arr = ds[v]
+                conf['filter_by_keys'] = get_filter_by_keys(arr)
+                conf['shape'] = arr.shape
+                conf['dtype'] = arr.dtype
+                dim_names = list(arr.dims)
+                conf['dims'] = { dim: arr[dim] for dim in dim_names }
+                conf_list.append(conf)
+                attr_dict[v] = arr.attrs
+            outer_list.append(conf_list)
+        out_list = []
+        # as long as we get data separately for each vertical level, we can
+        # easily merge the arrays. But I haven't guaranteed that yet!
+        for conf_list in outer_list:
+            arrs = []
+            for conf in conf_list:
+                arr = self._delayed_collection_arr(conf)
+                arr.attrs = attr_dict[arr.name]
+                arrs.append(arr)
+            ds = xr.merge(arrs, combine_attrs='drop_conflicts')
+            out_list.append(ds)
+        return out_list

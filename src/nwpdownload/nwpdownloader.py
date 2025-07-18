@@ -2,7 +2,6 @@
 '''
 
 import os, warnings, requests, json, functools
-import urllib.request
 import pandas as pd
 from io import StringIO
 from typing import Literal, Optional, Union
@@ -86,11 +85,6 @@ class NwpDownloader(NwpPath):
             """Download a subset specified by the regex search."""
             # TODO: Maybe optimize downloading multiple subsets with MultiThreading
 
-            # TODO An alternative to downloadling subset with curl is
-            # TODO  to use the request module directly.
-            # TODO  >> headers = dict(Range=f"bytes={start_bytes}-{end_bytes}")
-            # TODO  >> r = requests.get(grib_url, headers=headers)
-
             grib_source = self.grib
             if hasattr(grib_source, "as_posix") and grib_source.exists():
                 # The GRIB source is local. Curl the local file
@@ -137,16 +131,17 @@ class NwpDownloader(NwpPath):
                         print(f"  ERROR: Invalid cURL range {range}; Skip message.")
                     continue
 
+                headers = dict(Range=f"bytes={range}")
+                r = requests.get(grib_source, headers=headers, timeout=3)
                 if i == 1:
                     # If we are working on the first item, overwrite the existing file...
-                    curl = f'''curl -s --connect-timeout 3 --max-time 6 --range {range} "{grib_source}" > "{outFile}"'''
+                    open_mode = 'wb'
                 else:
                     # ...all other messages are appended to the subset file.
-                    curl = f'''curl -s --connect-timeout 3 --max-time 6 --range {range} "{grib_source}" >> "{outFile}"'''
+                    open_mode = 'ab'
 
-                if verbose:
-                    print(curl)
-                os.system(curl)
+                with open(outFile, open_mode) as f:
+                    f.write(r.content)
 
             if verbose:
                 print(f"💾 Saved the subset to {outFile}")
@@ -230,7 +225,9 @@ class NwpDownloader(NwpPath):
         # ===============
         if search in [None, ":"] or self.idx is None:
             # Download the full file from remote source
-            urllib.request.urlretrieve(self.grib, outFile, _reporthook)
+            r = requests.get(self.grib, timeout=3)
+            with open(outFile, 'wb') as f:
+                f.write(r.content)
 
             original_source = self.grib
 

@@ -5,6 +5,8 @@ import os, warnings, requests, json, functools
 import pandas as pd
 from io import StringIO
 from typing import Literal, Optional, Union
+from requests.adapters import HTTPAdapter, Retry
+from dask.distributed import get_worker
 from herbie.core import log, wgrib2_idx
 from herbie.misc import ANSI
 from herbie import Path, Herbie
@@ -14,6 +16,37 @@ class NwpDownloader(NwpPath):
     '''Herbie with download optimizations. Skips some unnecessary checks (same
     as NwpPath), and adds timeout limits to requests.
     '''
+
+    def session_get(self, url, timeout=3, byte_range=None):
+        '''Submit a GET request in a consistent manner across the various
+        downloads, reusing the session.
+        '''
+        new_session = False
+        try:
+            # Create a session for each worker, and reuse it within worker threads
+            w = get_worker()
+            if not hasattr(w, 'nwpdownload_session'):
+                new_session = True
+                w.nwpdownload_session = requests.Session()
+            session = w.nwpdownload_session
+        except:
+            # if there are no workers, create a session for the downloader
+            if not hasattr(self, 'session'):
+                new_session = True
+                self.session = requests.Session()
+            session = self.session
+        if new_session:
+            # set up the session
+            retry_strategy = Retry(total=5, backoff_factor=1,
+                                   status_forcelist=[504])
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+        if byte_range:
+            headers = dict(Range=f'bytes={byte_range}')
+            return session.get(url, headers=headers, timeout=timeout)
+        else:
+            return session.get(url, timeout=timeout)
 
     # Use timeout options for curl to avoid hanging.
     def download(
@@ -131,8 +164,7 @@ class NwpDownloader(NwpPath):
                         print(f"  ERROR: Invalid cURL range {range}; Skip message.")
                     continue
 
-                headers = dict(Range=f"bytes={range}")
-                r = requests.get(grib_source, headers=headers, timeout=3)
+                r = self.session_get(grib_source, timeout=3, byte_range=range)
                 if i == 1:
                     # If we are working on the first item, overwrite the existing file...
                     open_mode = 'wb'
@@ -225,7 +257,7 @@ class NwpDownloader(NwpPath):
         # ===============
         if search in [None, ":"] or self.idx is None:
             # Download the full file from remote source
-            r = requests.get(self.grib, timeout=3)
+            r = self.session_get(self.grib, timeout=3)
             with open(outFile, 'wb') as f:
                 f.write(r.content)
 
@@ -245,7 +277,6 @@ class NwpDownloader(NwpPath):
 
         return outFile
 
-    # Use timeout options for `requests.get` to avoid hanging.
     @functools.cached_property
     def index_as_dataframe(self) -> pd.DataFrame:
         """Read and cache the full index file."""
@@ -280,7 +311,7 @@ class NwpDownloader(NwpPath):
                 read_this_idx = self.idx
             else:
                 read_this_idx = None
-                response = requests.get(self.idx, timeout=3)
+                response = self.session_get(self.idx, timeout=3)
                 if response.status_code != 200:
                     response.raise_for_status()
                     response.close()
@@ -353,7 +384,7 @@ class NwpDownloader(NwpPath):
             # eccodes keywords explained here:
             # https://confluence.ecmwf.int/display/UDOC/Identification+keywords
 
-            r = requests.get(self.idx, timeout=3)
+            r = self.session_get(self.idx, timeout=3)
             idxs = [json.loads(x) for x in r.text.split("\n") if x]
             r.close()
             df = pd.DataFrame(idxs)

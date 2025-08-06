@@ -1,7 +1,7 @@
 '''Optimized Herbie-based downloader.
 '''
 
-import os, warnings, requests, json, functools
+import warnings, requests, json, functools
 import pandas as pd
 from io import StringIO
 from typing import Literal, Optional, Union
@@ -17,36 +17,43 @@ class NwpDownloader(NwpPath):
     as NwpPath), and adds timeout limits to requests.
     '''
 
+    def retrieve_session(self):
+        '''Get the existing http session, or create a new session.
+        '''
+        # do we already have the session?
+        if hasattr(self, 'session'):
+            return self.session
+        # does the worker have a session?
+        try:
+            w = get_worker()
+            has_worker = True
+        except:
+            has_worker = False
+        if has_worker:
+            if hasattr(w, 'nwpdownload_session'):
+                self.session = w.nwpdownload_session
+                return self.session
+        # make a new session
+        session = requests.Session()
+        retry_strategy = Retry(total=5, backoff_factor=1,
+                               status_forcelist=[504])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+        if has_worker:
+            w.nwpdownload_session = session
+        self.session = session
+        return self.session
+
     def session_get(self, url, timeout=3, byte_range=None):
         '''Submit a GET request in a consistent manner across the various
         downloads, reusing the session.
         '''
-        new_session = False
-        try:
-            # Create a session for each worker, and reuse it within worker threads
-            w = get_worker()
-            if not hasattr(w, 'nwpdownload_session'):
-                new_session = True
-                w.nwpdownload_session = requests.Session()
-            session = w.nwpdownload_session
-        except:
-            # if there are no workers, create a session for the downloader
-            if not hasattr(self, 'session'):
-                new_session = True
-                self.session = requests.Session()
-            session = self.session
-        if new_session:
-            # set up the session
-            retry_strategy = Retry(total=5, backoff_factor=1,
-                                   status_forcelist=[504])
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-            session.mount('http://', adapter)
-            session.mount('https://', adapter)
+        session = self.retrieve_session()
+        headers = {}
         if byte_range:
-            headers = dict(Range=f'bytes={byte_range}')
-            return session.get(url, headers=headers, timeout=timeout)
-        else:
-            return session.get(url, timeout=timeout)
+            headers['Range'] = f'bytes={byte_range}'
+        return session.get(url, headers=headers, timeout=timeout)
 
     # Use timeout options for curl to avoid hanging.
     def download(
@@ -142,10 +149,10 @@ class NwpDownloader(NwpPath):
             idx_df["download_groups"] = idx_df.grib_message.diff().ne(1).cumsum()
 
             # cURL subsets of each group
+            ranges = []
             for i, curl_group in idx_df.groupby("download_groups"):
                 if verbose:
                     print(f"Download subset group {i}")
-
                 if verbose:
                     for _, row in curl_group.iterrows():
                         print(
@@ -163,17 +170,21 @@ class NwpDownloader(NwpPath):
                     if verbose:
                         print(f"  ERROR: Invalid cURL range {range}; Skip message.")
                     continue
+                ranges.append(range)
 
-                r = self.session_get(grib_source, timeout=3, byte_range=range)
-                if i == 1:
-                    # If we are working on the first item, overwrite the existing file...
-                    open_mode = 'wb'
-                else:
-                    # ...all other messages are appended to the subset file.
-                    open_mode = 'ab'
-
-                with open(outFile, open_mode) as f:
-                    f.write(r.content)
+            # AWS doesn't support multipart downloads, must get each part
+            # separately
+            part_contents = []
+            for range_str in ranges:
+                r = self.session_get(grib_source, timeout=3,
+                                     byte_range=range_str)
+                part_contents.append(r.content)
+            # concatenate everything and write the whole file at once, which is
+            # probably better for the storage drive (if this makes it to the
+            # drive)
+            out = b''.join(part_contents)
+            with open(outFile, 'wb') as f:
+                f.write(out)
 
             if verbose:
                 print(f"💾 Saved the subset to {outFile}")

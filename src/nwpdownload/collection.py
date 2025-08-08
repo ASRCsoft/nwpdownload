@@ -1,12 +1,13 @@
 '''Organize collections of NWP files.
 '''
 
-import tempfile, shutil, dask
+import warnings, tempfile, shutil, dask, cfgrib
 from datetime import datetime
 from humanize import naturalsize
 import itertools as it
 import numpy as np
 import xarray as xr
+import dask.array as da
 from dask.distributed import get_client
 from herbie import Herbie, wgrib2
 from .nwppath import NwpPath
@@ -15,6 +16,18 @@ from .nwpdownloader import NwpDownloader
 def chunk_list(l, n):
     # https://stackoverflow.com/a/312464/5548959
     return [ l[i:i + n] for i in range(0, len(l), n) ]
+
+def get_filter_by_keys(arr):
+    '''Given an xarray DataArray, get appropriate filter_by_keys.
+    '''
+    # from each variable, grab shortName, typeOfLevel, and level (if present)
+    filter_by_keys = {}
+    attrs = arr.attrs
+    filter_by_keys['shortName'] = attrs['GRIB_shortName']
+    if 'GRIB_typeOfLevel' in attrs.keys():
+        filter_by_keys['typeOfLevel'] = attrs['GRIB_typeOfLevel']
+        # that's probably good-- no reason to separate data by level
+    return filter_by_keys
 
 class NwpCollection:
     '''Manage and download a (potentially large) collection of NWP files.

@@ -73,6 +73,8 @@ Requirements:
 
 - `kubectl` on the system running python, configured to connect to kubernetes
 - the dask-kubernetes-operator helm chart must be installed on kubernetes
+  (follow the directions
+  [here](https://kubernetes.dask.org/en/latest/installing.html))
 - permission to create kubernetes pods in the selected namespace
 - a directory that can be mounted by kubernetes, to store the files
 

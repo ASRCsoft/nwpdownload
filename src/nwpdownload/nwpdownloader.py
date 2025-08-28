@@ -36,7 +36,7 @@ class NwpDownloader(NwpPath):
         # make a new session
         session = requests.Session()
         retry_strategy = Retry(total=5, backoff_factor=1,
-                               status_forcelist=[504])
+                               status_forcelist=[503])
         adapter = HTTPAdapter(max_retries=retry_strategy)
         session.mount('http://', adapter)
         session.mount('https://', adapter)
